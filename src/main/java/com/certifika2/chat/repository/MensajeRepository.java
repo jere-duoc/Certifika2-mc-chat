@@ -7,5 +7,5 @@ import java.util.List;
 
 @Repository
 public interface MensajeRepository extends JpaRepository<Mensaje, Long> {
-    List<Mensaje> findByIdCursoOrderByFechaEnvioAsc(Long idCurso);
+    List<Mensaje> findByIdCursoOrderByFechaEnvioAsc(String idCurso);
 }

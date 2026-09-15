@@ -14,8 +14,9 @@ public class Mensaje {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long idMensaje;
 
-    private Long idCurso; // Sala de chat por curso
-    private String idUsuarioEmisor; // Guardamos ID de Google/Cognito o email
+    @Column(nullable = false, length = 120)
+    private String idCurso; // Código estable de la sala/curso
+    private String idUsuarioEmisor; // `sub` estable del usuario en Cognito
     private String nombreEmisor;
     
     @Column(length = 2000)

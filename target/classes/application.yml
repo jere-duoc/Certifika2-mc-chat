@@ -1,0 +1,25 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: ms-chat
+
+  datasource:
+    url: "jdbc:mysql://${RDS_HOSTNAME:localhost}:${RDS_PORT:3306}/${RDS_DB_NAME:certifika2_chat}?serverTimezone=UTC&sslMode=${RDS_SSL_MODE:PREFERRED}"
+    username: ${RDS_USERNAME:root}
+    password: ${RDS_PASSWORD:mysql}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${COGNITO_ISSUER_URI:https://cognito-idp.us-east-1.amazonaws.com/us-east-1_L3H9G2TFf}
+
+cognito:
+  client-id: ${COGNITO_CLIENT_ID:1rf3bts7p2klg1qvsjhqnb5o3n}

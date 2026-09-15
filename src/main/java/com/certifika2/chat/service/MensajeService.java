@@ -14,7 +14,7 @@ public class MensajeService {
 
     private final MensajeRepository mensajeRepository;
 
-    public Mensaje guardarMensaje(Long idCurso, String idUsuarioEmisor, String nombreEmisor, String contenido) {
+    public Mensaje guardarMensaje(String idCurso, String idUsuarioEmisor, String nombreEmisor, String contenido) {
         Mensaje mensaje = new Mensaje();
         mensaje.setIdCurso(idCurso);
         mensaje.setIdUsuarioEmisor(idUsuarioEmisor);
@@ -24,7 +24,7 @@ public class MensajeService {
         return mensajeRepository.save(mensaje);
     }
 
-    public List<Mensaje> obtenerHistorial(Long idCurso) {
+    public List<Mensaje> obtenerHistorial(String idCurso) {
         return mensajeRepository.findByIdCursoOrderByFechaEnvioAsc(idCurso);
     }
 }
