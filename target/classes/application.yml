@@ -21,5 +21,19 @@ spring:
         jwt:
           issuer-uri: ${COGNITO_ISSUER_URI:https://cognito-idp.us-east-1.amazonaws.com/us-east-1_L3H9G2TFf}
 
+  cloud:
+    aws:
+      region:
+        static: ${AWS_REGION:us-east-1}
+      sqs:
+        enabled: ${SQS_ENABLED:true}
+        listener:
+          auto-startup: ${SQS_LISTENER_AUTO_STARTUP:true}
+
 cognito:
   client-id: ${COGNITO_CLIENT_ID:1rf3bts7p2klg1qvsjhqnb5o3n}
+
+app:
+  sqs:
+    queue-anuncios: ${SQS_QUEUE_ANUNCIOS:certifika2-anuncios-queue}
+

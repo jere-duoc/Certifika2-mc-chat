@@ -1,0 +1,2 @@
+com\certifika2\chat\dto\AnuncioEvent.class
+com\certifika2\chat\listener\AnuncioSqsListener.class
