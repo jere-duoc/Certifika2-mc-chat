@@ -1,0 +1,107 @@
+name: Deploy to AWS - chat
+
+on:
+  push:
+    branches: [aws]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-aws-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  AWS_EXPECTED_ACCOUNT: '649282306554'
+  ECR_REPOSITORY: certifika2/chat
+  ECS_CONTAINER: chat
+  IMAGE_TAG: ${{ github.sha }}-${{ github.run_number }}-${{ github.run_attempt }}
+
+jobs:
+  build-and-push:
+    if: ${{ github.ref == 'refs/heads/aws' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Descargar codigo fuente
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciales temporales de AWS Academy
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Validar cuenta, region y repositorio
+        shell: bash
+        run: |
+          set -euo pipefail
+          account=$(aws sts get-caller-identity --query Account --output text)
+          test "$account" = "$AWS_EXPECTED_ACCOUNT"
+          test "$AWS_REGION" = "us-east-1"
+          aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" > /dev/null
+
+      - name: Iniciar sesion en ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Preparar Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Construir y publicar imagen
+        id: image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+
+      # Activar solo cuando el servicio ECS exista y sus variables esten configuradas.
+      - name: Actualizar servicio ECS con la imagen publicada
+        if: ${{ vars.ECS_DEPLOY_ENABLED == 'true' }}
+        env:
+          ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+          IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${ECS_CLUSTER:?Falta el secret ECS_CLUSTER}"
+          : "${ECS_SERVICE:?Falta el secret ECS_SERVICE}"
+          aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" > service.json
+          jq -e '.failures | length == 0' service.json > /dev/null
+          task=$(jq -er '.services[0] | select(.status == "ACTIVE") | .taskDefinition' service.json)
+          aws ecs describe-task-definition --task-definition "$task" --query taskDefinition > task.json
+          role="arn:aws:iam::$AWS_EXPECTED_ACCOUNT:role/LabRole"
+          jq -e --arg role "$role" --arg name "$ECS_CONTAINER" '
+            .taskRoleArn == $role and .executionRoleArn == $role and
+            ([.containerDefinitions[] | select(.name == $name)] | length == 1)
+          ' task.json > /dev/null
+          jq --arg name "$ECS_CONTAINER" --arg image "$IMAGE_URI" '
+            .containerDefinitions |= map(if .name == $name then .image = $image else . end) |
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities,
+                .registeredAt, .registeredBy, .deregisteredAt)
+          ' task.json > task-next.json
+          revision=$(aws ecs register-task-definition --cli-input-json file://task-next.json --query taskDefinition.taskDefinitionArn --output text)
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --task-definition "$revision" > /dev/null
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+          deployed=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
+          test "$deployed" = "$revision"
+
+      - name: Resumen de publicacion
+        env:
+          IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
+          DEPLOY_ENABLED: ${{ vars.ECS_DEPLOY_ENABLED }}
+        shell: bash
+        run: |
+          echo "Imagen publicada: $IMAGE_URI" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$DEPLOY_ENABLED" = "true" ]; then
+            echo "Servicio ECS actualizado y estable." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Solo ECR. Actualizacion ECS desactivada (ECS_DEPLOY_ENABLED)." >> "$GITHUB_STEP_SUMMARY"
+          fi

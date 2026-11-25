@@ -1,54 +1,39 @@
 package com.certifika2.chat.listener;
-
 import com.certifika2.chat.dto.AnuncioEvent;
-import com.certifika2.chat.service.MensajeService;
+import com.certifika2.chat.service.NotificacionService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.awspring.cloud.sqs.annotation.SqsListener;
+import io.awspring.cloud.sqs.listener.SqsHeaders;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
+import software.amazon.awssdk.services.sqs.model.Message;
 
-@Slf4j
-@Component
-@RequiredArgsConstructor
+@Component @RequiredArgsConstructor @Slf4j
 public class AnuncioSqsListener {
-
+    private final ObjectMapper mapper;
+    private final NotificacionService service;
     private final SimpMessagingTemplate messagingTemplate;
-    private final MensajeService mensajeService;
 
-    @SqsListener("${app.sqs.queue-anuncios}")
-    public void recibirAnuncio(AnuncioEvent anuncio) {
-        log.info("Mensaje SQS de anuncio recibido para curso '{}' (ID: {}): {}",
-                anuncio.codigoCurso(), anuncio.idCurso(), anuncio.titulo());
-
-        String salaCurso = (anuncio.codigoCurso() != null && !anuncio.codigoCurso().isBlank())
-                ? anuncio.codigoCurso()
-                : String.valueOf(anuncio.idCurso());
-
-        // 1. Guardar en base de datos para que los estudiantes desconectados puedan verlo en el historial
+    @SqsListener(value = "${app.sqs.queue-anuncios}", factory = "anunciosSqsFactory", acknowledgementMode = "ON_SUCCESS")
+    public void recibirAnuncio(String json, @Header(SqsHeaders.SQS_SOURCE_DATA_HEADER) Message original) throws Exception {
+        AnuncioEvent evento = mapper.readValue(json, AnuncioEvent.class);
+        // Exceptions must reach SQS: acknowledge only after durable history + individual inbox commit.
+        if (!service.recibir(evento, original.messageId())) return;
+        // A course-wide websocket event must never expose the recipient snapshot.
+        AnuncioEvent publico = new AnuncioEvent(evento.idCurso(), evento.codigoCurso(), evento.titulo(),
+                evento.contenido(), evento.idProfesor(), evento.nombreProfesor(), evento.fechaCreacion(),
+                evento.eventoId(), evento.tipoEvento(), null);
         try {
-            String remitente = "📢 [ANUNCIO] " + (anuncio.nombreProfesor() != null ? anuncio.nombreProfesor() : "Profesor");
-            String contenidoFormateado = "📌 " + anuncio.titulo() + "\n\n" + anuncio.contenido();
-            mensajeService.guardarMensaje(
-                    salaCurso,
-                    anuncio.idProfesor(),
-                    remitente,
-                    contenidoFormateado
-            );
-            log.info("Anuncio registrado en el historial de chat de la sala '{}'", salaCurso);
-        } catch (Exception ex) {
-            log.warn("No fue posible persistir el anuncio en el historial del chat: {}", ex.getMessage());
-        }
-
-        // 2. Transmisión WebSocket en tiempo real hacia los suscriptores conectados
-        String topicPrincipal = "/topic/curso/" + salaCurso;
-        log.info("Difundiendo notificación en tiempo real a {}", topicPrincipal);
-        messagingTemplate.convertAndSend(topicPrincipal, anuncio);
-
-        // Si existe un identificador numérico adicional y es distinto, también notificar a dicho canal
-        if (anuncio.idCurso() != null && !salaCurso.equals(String.valueOf(anuncio.idCurso()))) {
-            String topicSecundario = "/topic/curso/" + anuncio.idCurso();
-            messagingTemplate.convertAndSend(topicSecundario, anuncio);
+            String sala = evento.codigoCurso() != null ? evento.codigoCurso() : String.valueOf(evento.idCurso());
+            messagingTemplate.convertAndSend("/topic/curso/" + sala, publico);
+            if (evento.idCurso() != null && !sala.equals(String.valueOf(evento.idCurso()))) {
+                messagingTemplate.convertAndSend("/topic/curso/" + evento.idCurso(), publico);
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Difusión websocket no disponible; las notificaciones ya están guardadas");
         }
     }
 }
