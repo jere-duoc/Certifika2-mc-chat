@@ -65,8 +65,8 @@ jobs:
       - name: Actualizar servicio ECS con la imagen publicada
         if: ${{ vars.ECS_DEPLOY_ENABLED == 'true' }}
         env:
-          ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
-          ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER || secrets.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE || secrets.ECS_SERVICE }}
           IMAGE_URI: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.image.outputs.digest }}
         shell: bash
         run: |
